@@ -1,0 +1,304 @@
+## Chapter 4
+library(rethinking)
+
+prod( 1 + runif(12,0,0.1) )
+
+growth <- replicate( 10000 , prod( 1 + runif(12,0,0.1) ) )
+dens( growth , norm.comp=TRUE )
+
+big <- replicate( 10000 , prod( 1 + runif(12,0,0.5) ) )
+small <- replicate( 10000 , prod( 1 + runif(12,0,0.01) ) )
+
+dens(big)
+dens(small)
+
+log.big <- replicate( 10000 , log(prod(1 + runif(12,0,0.5))) )
+dens(log.big)
+
+
+library(rethinking)
+data(Howell1)
+d <- Howell1
+
+precis(d)
+
+d2 <- d[d$age>18,]
+
+dens(d2$height)
+precis(d2)
+
+
+curve( dnorm( x , 178 , 20 ) , from=100 , to=250 )
+curve( dunif( x , 0 , 50 ) , from=-10 , to=60 )
+
+sample_mu <- rnorm( 1e4 , 178 , 20 )
+sample_sigma <- runif( 1e4 , 0 , 50 )
+prior_h <- rnorm( 1e4 , sample_mu , sample_sigma )
+dens( prior_h )
+
+
+sample_mu <- rnorm( 1e4 , 178 , 100 )
+prior_h <- rnorm( 1e4 , sample_mu , sample_sigma )
+dens( prior_h )
+
+#grid approximation
+mu.list <- seq( from=150, to=160 , length.out=100 )
+sigma.list <- seq( from=7 , to=9 , length.out=100 )
+post <- expand.grid( mu=mu.list , sigma=sigma.list )
+post$LL <- sapply( 1:nrow(post) , function(i) sum(
+  dnorm( d2$height , post$mu[i] , post$sigma[i] , log=TRUE ) ) )
+post$prod <- post$LL + dnorm( post$mu , 178 , 20 , TRUE ) +
+  dunif( post$sigma , 0 , 50 , TRUE )
+post$prob <- exp( post$prod - max(post$prod) )
+
+contour_xyz( post$mu , post$sigma , post$prob )
+image_xyz( post$mu , post$sigma , post$prob )
+
+sample.rows <- sample( 1:nrow(post) , size=1e4 , replace=TRUE ,
+                       prob=post$prob )
+sample.mu <- post$mu[ sample.rows ]
+sample.sigma <- post$sigma[ sample.rows ]
+
+plot( sample.mu , sample.sigma , cex=0.5 , pch=16 , col=col.alpha(rangi2,0.1) )
+
+dens( sample.mu )
+dens( sample.sigma )
+PI( sample.mu )
+PI( sample.sigma )
+
+##quadratic approximatio
+flist <- alist(
+  height ~ dnorm( mu , sigma ) ,
+  mu ~ dnorm( 178 , 20 ) , #priors
+  sigma ~ dunif( 0 , 50 )
+)
+
+m4.1 <- quap( flist , data=d2 )
+
+precis( m4.1 )
+
+vcov( m4.1 ) #variance covariance
+
+diag( vcov( m4.1 ) )
+cov2cor( vcov( m4.1 ) )
+
+post <- extract.samples( m4.1 , n=1e4 )
+precis(post)
+plot(post)
+
+
+##look at relationship bewteen weight and height
+plot( d2$height ~ d2$weight )
+
+
+
+set.seed(2971)
+N <- 100 # 100 lines
+a <- rnorm( N , 178 , 20 )
+b <- rnorm( N , 0 , 10 )
+
+plot( NULL , xlim=range(d2$weight) , ylim=c(-100,400) ,
+      xlab="weight" , ylab="height" )
+abline( h=0 , lty=2 )
+abline( h=272 , lty=1 , lwd=0.5 )
+mtext( "b ~ dnorm(0,10)" )
+xbar <- mean(d2$weight)
+for ( i in 1:N ) curve( a[i] + b[i]*(x - xbar) ,
+                        from=min(d2$weight) , to=max(d2$weight) , add=TRUE ,
+                        col=col.alpha("black",0.2) )
+
+b <- rlnorm( 1e4 , 0 , 1 )
+dens( b , xlim=c(0,5) , adj=0.1 )
+
+
+##define model
+xbar <- mean(d2$weight)
+m4.3 <- quap(
+  alist(
+    height ~ dnorm( mu , sigma ) ,
+    mu <- a + b*( weight - xbar ) ,
+    a ~ dnorm( 178 , 20 ) ,
+    b ~ dlnorm( 0 , 1 ) ,
+    sigma ~ dunif( 0 , 50 )
+  ) , data=d2 )
+
+precis(m4.3)
+round( vcov( m4.3 ) , 3 )
+pairs(m4.3)
+
+
+plot( height ~ weight , data=d2 , col=rangi2 )
+post <- extract.samples( m4.3 )
+a_map <- mean(post$a)
+b_map <- mean(post$b)
+curve( a_map + b_map*(x - xbar) , add=TRUE )
+
+N <- 10
+dN <- d2[ 1:N , ]
+# dN <- d2
+mN <- quap(
+  alist(
+    height ~ dnorm( mu , sigma ) ,
+    mu <- a + b*( weight - mean(weight) ) ,
+    a ~ dnorm( 178 , 20 ) ,
+    b ~ dlnorm( 0 , 1 ) ,
+    sigma ~ dunif( 0 , 50 )
+  ) , data=dN )
+
+# extract 20 samples from the posterior
+post <- extract.samples( mN , n=20 )
+# display raw data and sample size
+plot( dN$weight , dN$height ,
+      xlim=range(d2$weight) , ylim=range(d2$height) ,
+      col=rangi2 , xlab="weight" , ylab="height" )
+mtext(concat("N = ",N))
+# plot the lines, with transparency
+for ( i in 1:20 )
+  curve( post$a[i] + post$b[i]*(x-mean(dN$weight)) ,
+         col=col.alpha("black",0.3) , add=TRUE )
+
+
+###
+mu_at_50 <- post$a + post$b * ( 50 - xbar )
+dens( mu_at_50 , col=rangi2 , lwd=2 , xlab="mu|weight=50" )
+
+
+##
+mu <- link( m4.3 )
+
+weight.seq <- seq( from=25 , to=70 , by=1 )
+
+mu <- link( m4.3 , data=data.frame(weight=weight.seq) )
+str(mu)
+
+plot( height ~ weight , d2 , type="n" )
+
+for ( i in 1:100 )
+  points( weight.seq , mu[i,] , pch=16 , col=col.alpha(rangi2,0.1) )
+
+
+mu.mean <- apply( mu , 2 , mean )
+mu.PI <- apply( mu , 2 , PI , prob=0.89 )
+
+plot( height ~ weight , data=d2 , col=col.alpha(rangi2,0.5) )
+# plot the MAP line, aka the mean mu for each weight
+lines( weight.seq , mu.mean )
+# plot a shaded region for 89% PI
+shade( mu.PI , weight.seq )
+
+
+##prediction
+sim.height <- sim( m4.3 , data=list(weight=weight.seq) )
+str(sim.height)
+height.PI <- apply( sim.height , 2 , PI , prob=0.99 )
+
+# plot raw data
+plot( height ~ weight , d2 , col=col.alpha(rangi2,0.5) )
+# draw MAP line
+lines( weight.seq , mu.mean )
+# draw HPDI region for line
+shade( mu.PI , weight.seq )
+# draw PI region for simulated heights
+shade( height.PI , weight.seq )
+
+###Polynomial
+library(rethinking)
+data(Howell1)
+d <- Howell1
+
+plot(d$height,d$weight)
+
+d$weight_s <- ( d$weight - mean(d$weight) )/sd(d$weight)
+d$weight_s2 <- d$weight_s^2
+m4.5 <- quap(
+  alist(
+    height ~ dnorm( mu , sigma ) ,
+    mu <- a + b1*weight_s + b2*weight_s2 ,
+    a ~ dnorm( 178 , 20 ) ,
+    b1 ~ dlnorm( 0 , 1 ) ,
+    b2 ~ dnorm( 0 , 1 ) ,
+    sigma ~ dunif( 0 , 50 )
+  ) , data=d )
+
+precis(m4.5)
+
+weight.seq <- seq( from=-2.2 , to=2 , length.out=30 )
+pred_dat <- list( weight_s=weight.seq , weight_s2=weight.seq^2 )
+mu <- link( m4.5 , data=pred_dat )
+mu.mean <- apply( mu , 2 , mean )
+mu.PI <- apply( mu , 2 , PI , prob=0.89 )
+sim.height <- sim( m4.5 , data=pred_dat )
+height.PI <- apply( sim.height , 2 , PI , prob=0.89 )
+
+
+plot( height ~ weight_s , d , col=col.alpha(rangi2,0.5) )
+lines( weight.seq , mu.mean )
+shade( mu.PI , weight.seq )
+shade( height.PI , weight.seq )
+
+
+##splines
+data(cherry_blossoms)
+d <- cherry_blossoms
+precis(d)
+
+plot(doy~year,d)
+
+d2 <- d[ complete.cases(d$doy) , ] # complete cases on doy
+num_knots <- 15
+knot_list <- quantile( d2$year , probs=seq(0,1,length.out=num_knots) )
+
+library(splines)
+B <- bs(d2$year,
+        knots=knot_list[-c(1,num_knots)] ,
+        degree=3 , intercept=TRUE )
+plot( NULL , xlim=range(d2$year) , ylim=c(0,1) , xlab="year" , ylab="basis" )
+for ( i in 1:ncol(B) ) lines( d2$year , B[,i] )
+
+
+m4.7 <- quap(
+  alist(
+    D ~ dnorm( mu , sigma ) ,
+    mu <- a + B %*% w ,
+    a ~ dnorm(100,10),
+    w ~ dnorm(0,10),
+    sigma ~ dexp(1)
+  ), data=list( D=d2$doy , B=B ) ,
+  start=list( w=rep( 0 , ncol(B) ) ) )
+
+precis(m4.7, depth=2)
+
+
+#EXCERCISE
+##4E1
+#first line
+#4E2: two
+
+#4E4: second line
+#4E5: 3
+
+#4M1
+mu_prior <- rnorm( 1e4 , 0 , 10 )
+sigma_prior <- runif( 1e4 , 0, 10 )
+h_sim <- rnorm( 1e4 , mu_prior , sigma_prior )
+dens( h_sim )
+
+##4M2
+  alist(
+    y~dnorm(mu,sigma),
+    mu~dnorm(0,10),
+    sigma~dexp(1)
+  )
+  
+##4M4
+  alist(
+    h~dnorm(mu,sigma),
+    h <- a+b*year,
+    a~dnorm(170,100),
+    b~dlnorm(0,1)
+    sigma~dunif(0,64)
+  )
+
+  #4M5: made b only positive
+  
+  #4M6: 
